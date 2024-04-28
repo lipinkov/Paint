@@ -157,6 +157,27 @@ class PaintWidget(Widget):
     def clear_canvas(self):
         self.update_canvas()
 
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            adjusted_pos = self.adjust_coords(touch.pos)
+            with self.canvas:
+                Color(*self.color)
+                touch.ud['line'] = Line(points=adjusted_pos, width=self.line_width)
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if 'line' in touch.ud:
+            adjusted_pos = self.adjust_coords(touch.pos)
+            touch.ud['line'].points += adjusted_pos
+        return super().on_touch_move(touch)
+
+    def adjust_coords(self, pos):
+        x, y = pos
+        x = min(max(x, self.x + self.line_width), self.right - self.line_width)
+        y = min(max(y, self.y + self.line_width), self.top - self.line_width)
+        return x, y
+
 class PaintApp(App):
     def build(self):
         self.title = 'Paint Application'
