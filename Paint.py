@@ -125,6 +125,15 @@ BoxLayout:
             Rectangle:
                 size: self.size
                 pos: self.pos
+        Slider:
+            id: brush_size_slider
+            min: 1
+            max: 10
+            value: 2
+            orientation: 'horizontal'
+            size_hint_x: None
+            width: 120
+            on_value: root.ids.paint_widget.change_brush_size(self.value)
 """
 
 class PaintWidget(Widget):
@@ -145,6 +154,9 @@ class PaintWidget(Widget):
     def update_canvas_properties(self, instance, value):
         self.rect.size = self.size
         self.rect.pos = self.pos
+
+    def change_brush_size(self, size):
+        self.line_width = size
 
     def switch_to_brush(self):
         self.eraser_mode = False
@@ -176,7 +188,7 @@ class PaintWidget(Widget):
         x, y = pos
         x = min(max(x, self.x + self.line_width), self.right - self.line_width)
         y = min(max(y, self.y + self.line_width), self.top - self.line_width)
-        return x, y
+        return [x, y]
 
 class PaintApp(App):
     def build(self):
