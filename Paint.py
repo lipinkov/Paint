@@ -5,7 +5,7 @@ Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 from kivy.app import App
 from kivy.lang import Builder
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line
+from kivy.graphics import Color, Rectangle, Line, Ellipse
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.colorpicker import ColorPicker
@@ -81,6 +81,11 @@ BoxLayout:
                 size_hint_y: None
                 height: 99.68
                 on_release: root.ids.paint_widget.switch_to_eraser()
+            Button:
+                text: 'Фигуры'
+                size_hint_y: None
+                height: 99.68
+                on_release: app.open_shape_picker()
             Button:
                 text: 'Цвет'
                 size_hint_y: None
@@ -171,6 +176,10 @@ class PaintWidget(Widget):
         self.line_width = 2
         self.color = (0, 0, 0, 1)
         self.eraser_mode = False
+        self.drawing_shape = False
+        self.shape = None
+        self.shape_start_pos = None
+        self.current_shape = None
         self.update_canvas()
 
     def update_canvas(self):
@@ -190,34 +199,88 @@ class PaintWidget(Widget):
     def switch_to_brush(self):
         self.eraser_mode = False
         self.color = (0, 0, 0, 1)
+        self.drawing_shape = False
 
     def switch_to_eraser(self):
         self.eraser_mode = True
         self.color = (1, 1, 1, 1)
+        self.drawing_shape = False
+
+    def set_shape(self, shape):
+        self.drawing_shape = True
+        self.shape = shape
+        self.color = (0, 0, 0, 1)
+
+    def on_touch_down(self, touch):
+        if touch.button != 'left':
+            return False
+        if self.collide_point(*touch.pos):
+            touch.ud['in_bounds'] = True
+            adjusted_pos = (min(max(touch.x, self.x + self.line_width), self.right - self.line_width),
+                            min(max(touch.y, self.y + self.line_width), self.top - self.line_width))
+            if not self.drawing_shape:
+                with self.canvas:
+                    Color(*self.color)
+                    touch.ud['line'] = Line(points=adjusted_pos, width=self.line_width)
+            else:
+                self.shape_start_pos = adjusted_pos
+            return True
+        else:
+            touch.ud['in_bounds'] = False
+            return False
+
+    def on_touch_move(self, touch):
+        if touch.button != 'left':
+            return
+        if touch.ud.get('in_bounds', False):
+            x, y = touch.x, touch.y
+            x = min(max(x, self.x + self.line_width), self.right - self.line_width)
+            y = min(max(y, self.y + self.line_width), self.top - self.line_width)
+
+            if 'line' in touch.ud and not self.drawing_shape:
+                touch.ud['line'].points += [x, y]
+            elif self.drawing_shape and self.shape_start_pos:
+                self.update_current_shape(touch)
+            return True
+
+    def update_current_shape(self, touch, final=False):
+        if self.shape_start_pos:
+            start_x, start_y = self.shape_start_pos
+            end_x, end_y = touch.x, touch.y
+            end_x = max(min(end_x, self.right - self.line_width), self.x + self.line_width)
+            end_y = max(min(end_y, self.top - self.line_width), self.y + self.line_width)
+
+            if self.shape == 'circle':
+                dx = end_x - start_x
+                dy = end_y - start_y
+                radius = ((dx ** 2 + dy ** 2) ** 0.5 / 2)
+                radius = min(radius, start_x - self.x - self.line_width, self.right - start_x - self.line_width,
+                             start_y - self.y - self.line_width, self.top - start_y - self.line_width)
+
+            if not final and self.current_shape:
+                self.canvas.remove(self.current_shape)
+
+            with self.canvas:
+                Color(*self.color)
+                if self.shape == 'circle':
+                    self.current_shape = Line(circle=(start_x, start_y, radius), width=self.line_width)
+                elif self.shape == 'rectangle':
+                    self.current_shape = Line(rectangle=(
+                        min(end_x, start_x), min(end_y, start_y), abs(end_x - start_x), abs(end_y - start_y)),
+                        width=self.line_width)
+                elif self.shape == 'line':
+                    self.current_shape = Line(points=[start_x, start_y, end_x, end_y], width=self.line_width)
 
     def clear_canvas(self):
         self.update_canvas()
 
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            adjusted_pos = self.adjust_coords(touch.pos)
-            with self.canvas:
-                Color(*self.color)
-                touch.ud['line'] = Line(points=adjusted_pos, width=self.line_width)
-            return True
-        return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        if 'line' in touch.ud and self.collide_point(*touch.pos):
-            adjusted_pos = self.adjust_coords(touch.pos)
-            touch.ud['line'].points += adjusted_pos
-        return super().on_touch_move(touch)
-
-    def adjust_coords(self, pos):
-        x, y = pos
-        x = min(max(x, self.x + self.line_width), self.right - self.line_width)
-        y = min(max(y, self.y + self.line_width), self.top - self.line_width)
-        return [x, y]
+    def on_touch_up(self, touch):
+        if touch.button != 'left':
+            return
+        if touch.ud.get('in_bounds', False) and self.drawing_shape and self.shape_start_pos:
+            self.update_current_shape(touch, final=True)
+            self.shape_start_pos = None
+            self.current_shape = None
 
 class PaintApp(App):
     def build(self):
@@ -229,6 +292,8 @@ class PaintApp(App):
     def mouse_pos_callback(self, instance, pos):
         if self.paint_widget.ids.paint_widget.collide_point(*pos):
             self.paint_widget.ids.cursor_position.text = f'Координаты: {int(pos[0])}, {int(pos[1])}'
+        else:
+            self.paint_widget.ids.cursor_position.text = 'Координаты:'
 
     def open_color_picker(self):
         color_picker = ColorPicker()
@@ -238,11 +303,40 @@ class PaintApp(App):
 
     def on_color(self, instance, value):
         self.paint_widget.ids.paint_widget.color = instance.color
+        if self.paint_widget.ids.paint_widget.eraser_mode:
+            self.paint_widget.ids.paint_widget.switch_to_brush()
 
     def change_color(self, r, g, b, a):
         self.paint_widget.ids.paint_widget.color = (r, g, b, a)
         if self.paint_widget.ids.paint_widget.eraser_mode:
             self.paint_widget.ids.paint_widget.switch_to_brush()
+
+    def open_shape_picker(self):
+        content = BoxLayout(orientation='vertical')
+        circle_button = Button(text='Круг', size_hint_y=None, height=50)
+        rectangle_button = Button(text='Прямоугольник', size_hint_y=None, height=50)
+        line_button = Button(text='Линия', size_hint_y=None, height=50)
+        cancel_button = Button(text='Отмена', size_hint_y=None, height=50)
+
+        popup = Popup(title="Выберите фигуру", content=content, size_hint=(None, None), size=(300, 300))
+
+        circle_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('circle')])
+        rectangle_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('rectangle')])
+        line_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('line')])
+        cancel_button.bind(on_release=popup.dismiss)
+
+        content.add_widget(circle_button)
+        content.add_widget(rectangle_button)
+        content.add_widget(line_button)
+        content.add_widget(cancel_button)
+
+        popup.open()
+
+    def set_shape(self, shape):
+        self.paint_widget.ids.paint_widget.set_shape(shape)
+
+    def minimize_app(self):
+        Window.minimize()
 
 if __name__ == '__main__':
     PaintApp().run()
