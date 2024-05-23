@@ -5,7 +5,7 @@ Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 from kivy.app import App
 from kivy.lang import Builder
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.graphics import Color, Rectangle, Line
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.colorpicker import ColorPicker
@@ -13,6 +13,12 @@ from kivy.uix.popup import Popup
 from kivy.core.window import Window
 from kivy.uix.label import Label
 from kivy.uix.slider import Slider
+from tkinter import filedialog
+from tkinter import Tk
+from PIL import Image
+
+root = Tk()
+root.withdraw()
 
 KV = """
 BoxLayout:
@@ -30,6 +36,7 @@ BoxLayout:
             text: 'Файл'
             size_hint_x: None
             width: 100
+            on_release: app.file_menu()
         Button:
             text: 'Очистить'
             size_hint_x: None
@@ -54,10 +61,12 @@ BoxLayout:
                 text: '–'
                 size_hint_x: None
                 width: 30
+                on_press: app.minimize_app()
             Button:
                 text: 'X'
                 size_hint_x: None
                 width: 30
+                on_press: app.stop()
     BoxLayout:
         orientation: 'horizontal'
         BoxLayout:
@@ -337,6 +346,51 @@ class PaintApp(App):
 
     def minimize_app(self):
         Window.minimize()
+
+    def file_menu(self):
+        content = BoxLayout(orientation='vertical')
+        save_button = Button(text='Сохранить', size_hint_y=None, height=78)
+        load_button = Button(text='Загрузить', size_hint_y=None, height=78)
+        cancel_button = Button(text='Отмена', size_hint_y=None, height=78)
+
+        popup = Popup(title="Файл", content=content, size_hint=(None, None), size=(300, 300))
+
+        save_button.bind(on_release=lambda x: [popup.dismiss(), self.save_drawing()])
+        load_button.bind(on_release=lambda x: [popup.dismiss(), self.load_drawing()])
+        cancel_button.bind(on_release=popup.dismiss)
+
+        content.add_widget(save_button)
+        content.add_widget(load_button)
+        content.add_widget(cancel_button)
+
+        popup.open()
+
+    def save_drawing(self):
+        filepath = filedialog.asksaveasfilename(
+            defaultextension='.png',
+            filetypes=[("PNG files", "*.png"), ("BMP files", "*.bmp"), ("JPEG files", "*.jpeg"), ("All files", "*.*")]
+        )
+        if filepath:
+            if filepath.endswith('.bmp'):
+                self.paint_widget.ids.paint_widget.export_to_png(filepath)
+                im = Image.open(filepath)
+                im.save(filepath, 'BMP')
+            elif filepath.endswith('.jpeg'):
+                self.paint_widget.ids.paint_widget.export_to_png(filepath)
+                im = Image.open(filepath)
+                im.save(filepath, 'JPEG')
+            else:
+                self.paint_widget.ids.paint_widget.export_to_png(filepath)
+
+    def load_drawing(self):
+        filepath = filedialog.askopenfilename(
+            filetypes=[("PNG files", "*.png"), ("BMP files", "*.bmp"), ("JPEG files", "*.jpeg"), ("All files", "*.*")]
+        )
+        if filepath:
+            self.paint_widget.ids.paint_widget.canvas.clear()
+            with self.paint_widget.ids.paint_widget.canvas.before:
+                Color(1, 1, 1, 1)
+                Rectangle(source=filepath, size=self.paint_widget.ids.paint_widget.size, pos=self.paint_widget.ids.paint_widget.pos)
 
 if __name__ == '__main__':
     PaintApp().run()
