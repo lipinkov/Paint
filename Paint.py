@@ -1,8 +1,8 @@
 from kivy.config import Config
+
 Config.set('graphics', 'fullscreen', 'auto')
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
-from kivy.app import App
 from kivy.lang import Builder
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line
@@ -12,13 +12,30 @@ from kivy.uix.colorpicker import ColorPicker
 from kivy.uix.popup import Popup
 from kivy.core.window import Window
 from kivy.uix.label import Label
-from kivy.uix.slider import Slider
+from kivy.clock import Clock
+from kivymd.app import MDApp
+from kivymd.uix.slider import MDSlider
+from kivymd.uix.tooltip import MDTooltip
 from tkinter import filedialog
 from tkinter import Tk
 from PIL import Image
 
 root = Tk()
 root.withdraw()
+
+class TooltipSlider(MDSlider, MDTooltip):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.bind(on_enter=self.show_tooltip_with_delay)
+
+    def show_tooltip_with_delay(self, *args):
+        self.tooltip_text = 'Изменение размера'
+        self.show_tooltip = True
+        Clock.schedule_once(self.hide_tooltip, 2)
+
+    def hide_tooltip(self, *args):
+        self.tooltip_text = ''
+        self.show_tooltip = False
 
 KV = """
 BoxLayout:
@@ -82,21 +99,29 @@ BoxLayout:
                     pos: self.pos
             Button:
                 text: 'Кисть'
+                font_name: 'Roboto-Bold'
+                font_size: '16sp'
                 size_hint_y: None
                 height: 99.68
                 on_release: root.ids.paint_widget.switch_to_brush()
             Button:
                 text: 'Ластик'
+                font_name: 'Roboto-Bold'
+                font_size: '16sp'
                 size_hint_y: None
                 height: 99.68
                 on_release: root.ids.paint_widget.switch_to_eraser()
             Button:
                 text: 'Фигуры'
+                font_name: 'Roboto-Bold'
+                font_size: '16sp'
                 size_hint_y: None
                 height: 99.68
                 on_release: app.open_shape_picker()
             Button:
-                text: 'Цвет'
+                text: 'Палитра'
+                font_name: 'Roboto-Bold'
+                font_size: '16sp'
                 size_hint_y: None
                 height: 99.68
                 on_release: app.open_color_picker()
@@ -163,32 +188,38 @@ BoxLayout:
             Rectangle:
                 size: self.size
                 pos: self.pos
-        Slider:
+        TooltipSlider:
             id: brush_size_slider
-            min: 1
-            max: 10
-            value: 2
+            min: 2  
+            max: 10  
+            value: 5  
             orientation: 'horizontal'
             size_hint_x: None
-            width: 120
+            width: 204  
             on_value: root.ids.paint_widget.change_brush_size(self.value)
+            tooltip_text: 'Изменение размера'
+        Label:
+            size_hint_x: 1
         Label:
             id: cursor_position
             text: 'Координаты:'
-            size_hint_x: 0.5
+            size_hint_x: None
+            width: 200
             color: 0, 0, 0, 1
+            halign: 'right'
 """
 
 class PaintWidget(Widget):
     def __init__(self, **kwargs):
         super(PaintWidget, self).__init__(**kwargs)
-        self.line_width = 2
+        self.line_width = 5
         self.color = (0, 0, 0, 1)
         self.eraser_mode = False
         self.drawing_shape = False
         self.shape = None
         self.shape_start_pos = None
         self.current_shape = None
+        self.prev_pos = None
         self.update_canvas()
 
     def update_canvas(self):
@@ -207,26 +238,27 @@ class PaintWidget(Widget):
 
     def switch_to_brush(self):
         self.eraser_mode = False
-        self.color = (0, 0, 0, 1)
+        self.color = self.saved_color
         self.drawing_shape = False
 
     def switch_to_eraser(self):
         self.eraser_mode = True
+        self.saved_color = self.color
         self.color = (1, 1, 1, 1)
         self.drawing_shape = False
 
     def set_shape(self, shape):
         self.drawing_shape = True
         self.shape = shape
-        self.color = (0, 0, 0, 1)
+        self.color = self.saved_color
 
     def on_touch_down(self, touch):
         if touch.button != 'left':
             return False
         if self.collide_point(*touch.pos):
             touch.ud['in_bounds'] = True
-            adjusted_pos = (min(max(touch.x, self.x + self.line_width), self.right - self.line_width),
-                            min(max(touch.y, self.y + self.line_width), self.top - self.line_width))
+            adjusted_pos = self._adjust_touch_pos(touch.x, touch.y)
+            self.prev_pos = adjusted_pos
             if not self.drawing_shape:
                 with self.canvas:
                     Color(*self.color)
@@ -242,12 +274,14 @@ class PaintWidget(Widget):
         if touch.button != 'left':
             return
         if touch.ud.get('in_bounds', False):
-            x, y = touch.x, touch.y
-            x = min(max(x, self.x + self.line_width), self.right - self.line_width)
-            y = min(max(y, self.y + self.line_width), self.top - self.line_width)
-
+            x, y = self._adjust_touch_pos(touch.x, touch.y)
             if 'line' in touch.ud and not self.drawing_shape:
-                touch.ud['line'].points += [x, y]
+                if self.prev_pos:
+                    points = [self.prev_pos[0], self.prev_pos[1], x, y]
+                    with self.canvas:
+                        Color(*self.color)
+                        Line(points=points, width=self.line_width)
+                self.prev_pos = (x, y)
             elif self.drawing_shape and self.shape_start_pos:
                 self.update_current_shape(touch)
             return True
@@ -255,9 +289,7 @@ class PaintWidget(Widget):
     def update_current_shape(self, touch, final=False):
         if self.shape_start_pos:
             start_x, start_y = self.shape_start_pos
-            end_x, end_y = touch.x, touch.y
-            end_x = max(min(end_x, self.right - self.line_width), self.x + self.line_width)
-            end_y = max(min(end_y, self.top - self.line_width), self.y + self.line_width)
+            end_x, end_y = self._adjust_touch_pos(touch.x, touch.y)
 
             if self.shape == 'circle':
                 dx = end_x - start_x
@@ -286,15 +318,23 @@ class PaintWidget(Widget):
     def on_touch_up(self, touch):
         if touch.button != 'left':
             return
-        if touch.ud.get('in_bounds', False) and self.drawing_shape and self.shape_start_pos:
-            self.update_current_shape(touch, final=True)
-            self.shape_start_pos = None
-            self.current_shape = None
+        if touch.ud.get('in_bounds', False):
+            if self.drawing_shape and self.shape_start_pos:
+                self.update_current_shape(touch, final=True)
+                self.shape_start_pos = None
+                self.current_shape = None
+            self.prev_pos = None
 
-class PaintApp(App):
+    def _adjust_touch_pos(self, x, y):
+        x = min(max(x, self.x + self.line_width), self.right - self.line_width)
+        y = min(max(y, self.y + self.line_width), self.top - self.line_width)
+        return x, y
+
+class PaintApp(MDApp):
     def build(self):
         self.title = 'Paint Application'
         self.paint_widget = Builder.load_string(KV)
+        self.paint_widget.ids.paint_widget.saved_color = (0, 0, 0, 1)
         Window.bind(mouse_pos=self.mouse_pos_callback)
         return self.paint_widget
 
@@ -305,18 +345,25 @@ class PaintApp(App):
             self.paint_widget.ids.cursor_position.text = 'Координаты:'
 
     def open_color_picker(self):
-        color_picker = ColorPicker()
+        color_picker = ColorPicker(color=self.paint_widget.ids.paint_widget.color)
         color_picker.bind(color=self.on_color)
-        popup = Popup(title="Выберите цвет", content=color_picker, size_hint=(None, None), size=(400, 400))
+        popup_content = BoxLayout(orientation='vertical')
+        popup_content.add_widget(color_picker)
+        choose_button = Button(text='Выбрать', size_hint_y=None, height=50)
+        choose_button.bind(on_release=lambda x: [popup.dismiss(), self.on_color(color_picker, color_picker.color)])
+        popup_content.add_widget(choose_button)
+        popup = Popup(title="Выберите цвет", content=popup_content, size_hint=(None, None), size=(400, 450))
         popup.open()
 
     def on_color(self, instance, value):
-        self.paint_widget.ids.paint_widget.color = instance.color
+        self.paint_widget.ids.paint_widget.color = value
+        self.paint_widget.ids.paint_widget.saved_color = value
         if self.paint_widget.ids.paint_widget.eraser_mode:
             self.paint_widget.ids.paint_widget.switch_to_brush()
 
     def change_color(self, r, g, b, a):
         self.paint_widget.ids.paint_widget.color = (r, g, b, a)
+        self.paint_widget.ids.paint_widget.saved_color = (r, g, b, a)
         if self.paint_widget.ids.paint_widget.eraser_mode:
             self.paint_widget.ids.paint_widget.switch_to_brush()
 
@@ -325,19 +372,19 @@ class PaintApp(App):
         circle_button = Button(text='Круг', size_hint_y=None, height=50)
         rectangle_button = Button(text='Прямоугольник', size_hint_y=None, height=50)
         line_button = Button(text='Линия', size_hint_y=None, height=50)
-        cancel_button = Button(text='Отмена', size_hint_y=None, height=50)
+        exit_button = Button(text='Выйти', size_hint_y=None, height=50)
 
         popup = Popup(title="Выберите фигуру", content=content, size_hint=(None, None), size=(300, 300))
 
         circle_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('circle')])
         rectangle_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('rectangle')])
         line_button.bind(on_release=lambda x: [popup.dismiss(), self.set_shape('line')])
-        cancel_button.bind(on_release=popup.dismiss)
+        exit_button.bind(on_release=popup.dismiss)
 
         content.add_widget(circle_button)
         content.add_widget(rectangle_button)
         content.add_widget(line_button)
-        content.add_widget(cancel_button)
+        content.add_widget(exit_button)
 
         popup.open()
 
@@ -390,7 +437,8 @@ class PaintApp(App):
             self.paint_widget.ids.paint_widget.canvas.clear()
             with self.paint_widget.ids.paint_widget.canvas.before:
                 Color(1, 1, 1, 1)
-                Rectangle(source=filepath, size=self.paint_widget.ids.paint_widget.size, pos=self.paint_widget.ids.paint_widget.pos)
+                Rectangle(source=filepath, size=self.paint_widget.ids.paint_widget.size,
+                          pos=self.paint_widget.ids.paint_widget.pos)
 
 if __name__ == '__main__':
     PaintApp().run()
